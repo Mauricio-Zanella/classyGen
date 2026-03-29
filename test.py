@@ -11,6 +11,6 @@ import pandas as pd
 
 # df = pd.read_csv('/home/mauricio/Documents/Unesp/CFD/classyGen/curve.csv')
 data = np.genfromtxt('/home/mauricio/Documents/Unesp/CFD/classyGen/curve.csv', delimiter=',', usecols=2)[1::]
-print(len(data))
+print(data)
 # print(df)
 

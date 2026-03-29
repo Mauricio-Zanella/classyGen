@@ -6,60 +6,77 @@ from common import Spline
 from tqdm import tqdm
 
 
-def fixPoints(points, radius, angleMax = 90.0, distanceMin = 1e-12):
+import numpy as np
+
+def fixPoints(points, radius, angleMax=90.0, distanceMin=1e-12):
     diffs = np.diff(points, axis=0)
     dist_sq = np.sum(diffs * diffs, axis=1) 
-    keep_duplicate_mask = np.ones(len(points), dtype=bool)
+    mask = np.ones(len(points), dtype=bool)
 
     for i in range(len(points) - 1):
         if dist_sq[i] < distanceMin**2:
-            keep_duplicate_mask[i + 1] = False
+            mask[i + 1] = False
 
-    points_clean = points[keep_duplicate_mask]
-    radius_clean = radius[keep_duplicate_mask]
- 
+    fixedPoints = points[mask]
+    fixedRadius = radius[mask]
 
 
-    vectors = np.diff(points_clean, axis=0)          
-    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
-    unit_vectors = vectors / norms
+    mask = np.ones(len(fixedPoints), dtype=bool)
 
-    dot_products = np.sum(unit_vectors[:-1] * unit_vectors[1:], axis=1)
+    i = 1
+    while i < len(fixedPoints) - 1:
+        v1 = fixedPoints[i] - fixedPoints[i - 1]
+        n1 = np.linalg.norm(v1)
+        if n1 < distanceMin:
+            mask[i] = False
+            i += 1
+            continue
+        v1 /= n1
 
-    dot_products = np.clip(dot_products, -1.0, 1.0)
-    angles_rad = np.arccos(dot_products)
-    angles_deg = np.degrees(angles_rad)
+        v2 = fixedPoints[i + 1] - fixedPoints[i]
+        n2 = np.linalg.norm(v2)
+        if n2 < distanceMin:
+            mask[i + 1] = False
+            i += 1
+            continue
+        v2 /= n2
 
-    keep_angle_mask = np.ones(len(points_clean), dtype=bool)
-    for j in range(len(angles_deg)):
-        if angles_deg[j] > angleMax:
-            keep_angle_mask[j + 1] = False  
+        dot = np.clip(np.dot(v1, v2), -1.0, 1.0)
+        angle = np.degrees(np.arccos(dot))
 
-    points = points_clean[keep_angle_mask]
-    radius = radius_clean[keep_angle_mask]
+        if angle > angleMax:
+            j = i + 1
+            while j < len(fixedPoints):
+                v2 = fixedPoints[j] - fixedPoints[i]
+                n2 = np.linalg.norm(v2)
+
+                if n2 < distanceMin:
+                    mask[j] = False
+                    j += 1
+                    continue
+
+                v2 /= n2
+
+                dot = np.clip(np.dot(v1, v2), -1.0, 1.0)
+                angle = np.degrees(np.arccos(dot))
+
+                if angle <= angleMax:
+                    break
+
+                mask[j] = False
+                j += 1
+
+            if j < len(fixedPoints):
+                i = j
+            else:
+                break
+        else:
+            i += 1
+
+    points = fixedPoints[mask]
+    radius = fixedRadius[mask]
 
     return points, radius
-
-
-# def fixPoints(points, radius):
-#     vectors = np.diff(points, axis=0)
-#     norms = np.linalg.norm(vectors, axis=1, keepdims=True)
-#     for i in range(len(norms)):
-#         if 
-#     norms = np.where(norms == 0, 1.0, norms)
-#     unit_vectors = vectors / norms
-
-#     # Compute dot products between consecutive unit vectors
-#     dot_products = np.sum(unit_vectors[:-1] * unit_vectors[1:], axis=1)
-
-#     # Clip dot products to [-1, 1] to avoid numerical issues
-#     dot_products = np.clip(dot_products, -1.0, 1.0)
-
-#     # Compute angles using arccos
-#     angles_rad = np.arccos(dot_products)
-
-
-#     return points, radius
 
 def tangents(points):
     tang = []
@@ -96,7 +113,12 @@ csv = '/home/mauricio/Documents/Unesp/CFD/classyGen/curve.csv'
 radius = np.genfromtxt(csv, delimiter=',', usecols=5)[1::]
 points = np.genfromtxt(csv, delimiter=',', usecols=[6,7,8])[1::]
 points, radius = fixPoints(points,radius)
+
+points = Spline(np.array(points), n_spline_points = 300).GetPoints()
+radius = np.interp(np.linspace(0, 1, len(points)), np.linspace(0, 1, len(radius)), radius)
 tang = tangents(points)
+
+
 # a = [points[0]]
 # for i in range(len(points)-1):
 #     b = np.linalg.norm((points[i]-points[1+1]))
@@ -108,7 +130,9 @@ tang = tangents(points)
 # print(min(a))
 
 # a = Spline(np.array(points))
-# # 
+# 
+print(len(points))
+print(len(radius))
 # plotter = pv.Plotter()
 # plotter.add_mesh(a.GetSplinePolyData(), color='black', point_size=10, render_points_as_spheres=True, label='Original Points')
 # plotter.add_legend()
@@ -161,20 +185,38 @@ for i in tqdm(range(len(points))):
         n_outer_spline_points=20
     )
     sketches.append(sketch)
+print(len(sketches))
 
-skip = int(np.floor(len(sketches)/100))
-extrude = cb.LoftedShape(sketches[0], sketches[-1], [*sketches[1:-2:skip]])
-# extrude = cb.LoftedShape(sketches[0], sketches[100], [*sketches[0:99]])
-
-for axis in range(3):
-    extrude.chop(axis, count=10)
-
-
-
-
+segCount = 30
+segSize = len(sketches)/30
 mesh = cb.Mesh()
 
-mesh.add(extrude)
+for i in range(segCount-1):
+    first = int(np.round(i*segSize))
+    last = int(np.round((i+1)*segSize))
+    extrude = cb.LoftedShape(sketches[first], sketches[last], [*sketches[first+1:last-1]])
+    for axis in range(3):
+        extrude.chop(axis, count=10)
+
+    mesh.add(extrude)
+
+
+
+
+
+# skip = int(np.floor(len(sketches)/100))
+# extrude = cb.LoftedShape(sketches[0], sketches[-1], [*sketches[1:-2:skip]])
+# extrude = cb.LoftedShape(sketches[0], sketches[141], [*sketches[0:141]])
+
+# for axis in range(3):
+#     extrude.chop(axis, count=10)
+
+
+
+
+# mesh = cb.Mesh()
+
+# mesh.add(extrude)
 
 base = '/home/mauricio/Documents/Unesp/CFD/classyGen'
 mesh.write(os.path.join(base, "case", "system", "blockMeshDict"))
