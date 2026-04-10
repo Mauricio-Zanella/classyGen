@@ -6,6 +6,11 @@ from tqdm import tqdm
 # import vmtk
 # from vmtk import vmtkbranchextractor
 from vmtk import pypes
+import vtk
+
+from vmtk import vmtkscripts
+from vtk.numpy_interface import dataset_adapter as dsa
+
 
 
 # Tangent function, aproximates tangents with secant
@@ -23,18 +28,60 @@ def tangents(points):
         tang.append(t / norm)
     return tang
 
+reader = vmtkscripts.vmtkSurfaceReader()
+reader.InputFileName = '/home/mauricio/Documents/Unesp/TCC/AneuriskDatabase/models/C0001/morphology/centerlines.vtp'
+reader.Execute()
 
-# Starting to use vmtk library
-centerline = '/home/mauricio/Documents/Unesp/CFD/AneuriskDatabase/models/C0001/morphology/centerlines.vtp'
-output = '/home/mauricio/Documents/Unesp/CFD/classyGen/branches.vtp'
-args = f'vmtkbranchextractor -ifile {centerline} -ofile {output} -radiusarray MaximumInscribedSphereRadius'
-myPype = pypes.PypeRun(args)
+extractor = vmtkscripts.vmtkBranchExtractor()
+extractor.Centerlines = reader.Surface
+extractor.Execute()
+
+
+
+# threshold = vmtkThreshold()
+# threshold.Surface = extractor.Centerlines
+# threshold.CellEntityIdsArrayName = extractor.CenterlineIdsArrayName
+# threshold.LowThreshold = threshold.HighThreshold = 6
+# threshold.Execute()
+
+
+threshold = vtk.vtkThreshold()
+threshold.SetInputArrayToProcess(
+            0, 0, 0,
+            vtk.vtkDataObject.FIELD_ASSOCIATION_CELLS,
+            extractor.CenterlineIdsArrayName
+        )
+threshold.SetInputData(extractor.Centerlines)
+threshold.SetLowerThreshold(0)
+threshold.SetUpperThreshold(0)
+threshold.Update()
+
+meshToSurface = vmtkscripts.vmtkMeshToSurface()
+meshToSurface.Mesh = threshold.GetOutput()
+meshToSurface.Execute()
+
+# viewer = vmtkscripts.vmtkSurfaceViewer()
+# viewer.Surface = meshToSurface.Surface
+# viewer.Execute()
+
+
+
+# # Starting to use vmtk library
+# centerline = '/home/mauricio/Documents/Unesp/CFD/AneuriskDatabase/models/C0001/morphology/centerlines.vtp'
+# output = '/home/mauricio/Documents/Unesp/CFD/classyGen/branches.vtp'
+# args = f'vmtkbranchextractor -ifile {centerline} -ofile {output} -radiusarray MaximumInscribedSphereRadius'
+# myPype = pypes.PypeRun(args)
+
+
+npCenterlines = dsa.WrapDataObject(meshToSurface.Surface)
+
+
 
 
 # Loads points and radius arrays
-csv = '/home/mauricio/Documents/Unesp/CFD/classyGen/curve.csv'
-radius = np.genfromtxt(csv, delimiter=',', usecols=5)[1::]
-points = np.genfromtxt(csv, delimiter=',', usecols=[6,7,8])[1::]
+# csv = '/home/mauricio/Documents/Unesp/CFD/classyGen/curve.csv'
+radius = npCenterlines.PointData.GetArray("MaximumInscribedSphereRadius")
+points = npCenterlines.Points
 
 
 # Modifies Points and Radius for Spline usage
@@ -43,7 +90,7 @@ radius = np.interp(np.linspace(0, 1, len(points)), np.linspace(0, 1, len(radius)
 
 
 tang = tangents(points)
-base = '/home/mauricio/Documents/Unesp/CFD/classyGen'
+base = '/home/mauricio/Documents/Unesp/TCC/classyGen'
 
 
 # Defining first base circlepoints
@@ -110,5 +157,4 @@ for i in range(segCount):
     mesh.add(extrude)
 
 # Writes BlockMesh
-base = '/home/mauricio/Documents/Unesp/CFD/classyGen'
 mesh.write(f'{base}/case/system/blockMeshDict')
